@@ -11,13 +11,19 @@ try{manualPendingKey=sessionStorage.getItem(manualKeyStorage)||""}catch{}
 function manualDate(){const b=new Date(Date.now()-3*3600000);return b.toISOString().slice(0,16)}
 $("manual-date").value=manualDate();
 function manualProducts(products){
- const old=new Map(Array.from($("manual-products").querySelectorAll("input"),i=>[i.dataset.product,i.value]));
- $("manual-products").replaceChildren();
- for(const p of products.filter(p=>p.active)){
-  const label=document.createElement("label");label.className="manual-product";
-  const span=document.createElement("span");span.textContent=p.name+" · "+p.available_stock+" disponíveis";
-  const input=document.createElement("input");input.type="number";input.min="0";input.max=String(Math.min(50,p.available_stock));input.step="1";input.value=old.get(p.id)||"0";input.dataset.product=p.id;input.setAttribute("aria-label","Quantidade de "+p.name);
-  label.append(span,input);$("manual-products").append(label);
+ const parent=$("manual-products"), active=products.filter(p=>p.active);
+ const existing=Array.from(parent.querySelectorAll("input"));
+ if(existing.length===active.length&&existing.every((i,n)=>i.dataset.product===active[n].id)){
+  active.forEach((p,n)=>{const i=existing[n];i.max=String(Math.max(0,Math.min(50,p.available_stock)));i.previousElementSibling.textContent=p.name+" · "+p.available_stock+" disponíveis";});
+ }else{
+  const old=new Map(existing.map(i=>[i.dataset.product,i.value]));
+  parent.replaceChildren();
+  for(const p of active){
+   const label=document.createElement("label");label.className="manual-product";
+   const span=document.createElement("span");span.textContent=p.name+" · "+p.available_stock+" disponíveis";
+   const input=document.createElement("input");input.type="number";input.min="0";input.max=String(Math.max(0,Math.min(50,p.available_stock)));input.step="1";input.value=old.get(p.id)||"0";input.dataset.product=p.id;input.setAttribute("aria-label","Quantidade de "+p.name);
+   label.append(span,input);parent.append(label);
+  }
  }
  manualTotal();
 }
