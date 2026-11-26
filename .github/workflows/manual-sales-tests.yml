@@ -1,0 +1,59 @@
+name: CAFZIN manual sales tests
+on:
+  push:
+    branches: ['feature/vendas-particulares']
+  pull_request:
+    paths: ['admin/index.html', 'supabase/manual-sales.sql', 'tests/manual-sales-*.sql', '.github/workflows/manual-sales-tests.yml']
+permissions:
+  contents: read
+jobs:
+  isolated-db:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: cafzin_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: ci-only
+      PGDATABASE: cafzin_test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check admin JavaScript syntax
+        run: |
+          python3 -c "import re,pathlib; s=pathlib.Path('admin/index.html').read_text(); pathlib.Path('/tmp/admin-script.js').write_text(re.search(r'<script>(.*?)</script>',s,re.S).group(1))"
+          node --check /tmp/admin-script.js
+      - name: Test against isolated synthetic database
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -f tests/manual-sales-fixture.sql
+          psql -X -v ON_ERROR_STOP=1 -f supabase/manual-sales.sql
+          psql -X -v ON_ERROR_STOP=1 -f tests/manual-sales-test.sql
+      - name: Test simultaneous attempts for the last unreserved unit
+        shell: bash
+        run: |
+          set +e
+          attempt() {
+            psql -X -v ON_ERROR_STOP=1 -c "set role authenticated; select set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000001',false); select public.record_manual_sale('$1','{\"a\":1}','{\"full_name\":\"Cliente Teste\"}','{\"method\":\"pickup\",\"location\":\"school\"}',3250,0,'pix','2000-01-01T12:00:00Z');"
+          }
+          attempt 00000000-0000-4000-8000-000000000021 > /tmp/attempt1.log 2>&1 & p1=$!
+          attempt 00000000-0000-4000-8000-000000000022 > /tmp/attempt2.log 2>&1 & p2=$!
+          wait "$p1"; r1=$?
+          wait "$p2"; r2=$?
+          set -e
+          cat /tmp/attempt1.log /tmp/attempt2.log
+          if [[ "$r1" == 0 && "$r2" != 0 ]]; then grep -q insufficient_stock /tmp/attempt2.log
+          elif [[ "$r2" == 0 && "$r1" != 0 ]]; then grep -q insufficient_stock /tmp/attempt1.log
+          else echo "Expected exactly one successful purchase"; exit 1; fi
+          test "$(psql -X -At -c "select stock_on_hand||':'||stock_reserved||':'||available_stock from public.products where id='a'")" = "1:1:0"
+          test "$(psql -X -At -c "select count(*) from public.orders")" = "2"
