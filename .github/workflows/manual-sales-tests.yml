@@ -1,0 +1,41 @@
+name: CAFZIN manual sales tests
+on:
+  push:
+    branches: ['feature/vendas-particulares']
+  pull_request:
+    paths: ['admin/index.html', 'supabase/manual-sales.sql', 'tests/manual-sales-*.sql', '.github/workflows/manual-sales-tests.yml']
+permissions:
+  contents: read
+jobs:
+  isolated-db:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: ci-only
+          POSTGRES_DB: cafzin_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: ci-only
+      PGDATABASE: cafzin_test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check admin JavaScript syntax
+        run: |
+          python3 -c "import re,pathlib; s=pathlib.Path('admin/index.html').read_text(); pathlib.Path('/tmp/admin-script.js').write_text(re.search(r'<script>(.*?)</script>',s,re.S).group(1))"
+          node --check /tmp/admin-script.js
+      - name: Test against isolated synthetic database
+        run: |
+          psql -X -v ON_ERROR_STOP=1 -f tests/manual-sales-fixture.sql
+          psql -X -v ON_ERROR_STOP=1 -f supabase/manual-sales.sql
+          psql -X -v ON_ERROR_STOP=1 -f tests/manual-sales-test.sql
